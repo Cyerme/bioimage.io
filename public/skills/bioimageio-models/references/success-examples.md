@@ -457,25 +457,35 @@ weights:
        reproducibility_tolerance:
          - output_ids: [instance_labels]
            weights_formats: [pytorch_state_dict]
-           mismatched_elements_per_million: 500
+           mismatched_elements_per_million: 2800
    ```
 
    For an integer label map, `relative_tolerance` / `absolute_tolerance` are inert
    (a boundary pixel flipping 0→23 is arbitrarily far in both), so `ppm` is the only
-   meaningful knob — leave the other two at their defaults. Justify the number
-   structurally: 500 ppm is 508 px of 1 016 064, below the 2 907 px smallest
-   instance, so it cannot conceal a gained, lost, split or merged instance.
-   `_get_tolerance` takes the **first** matching entry, so list specific entries
-   before any catch-all; the ppm field is capped at 5000.
+   meaningful knob — leave the other two at their defaults. Size the number against a
+   structural ceiling rather than fitting it to the measurement: the output has
+   1 016 064 elements and the smallest reference instance is 2 907 px, so 2 861 ppm is
+   the largest allowance that still cannot conceal an instance being gained, lost,
+   split or merged. 2 800 ppm sits just under that and leaves ~6.5x headroom over the
+   observed 430.1 ppm. Fitting it instead to the observation (500 ppm for an observed
+   430 ppm) would consume 86% of the allowance on the one GPU that was tested, so a
+   different card flips the report to `failed` with no change to the model. Record the
+   derivation in a sibling `reproducibility_tolerance_rationale` string so a reviewer
+   can check the arithmetic. `_get_tolerance` takes the **first** matching entry, so
+   list specific entries before any catch-all; the ppm field is capped at 5000.
 
 5. **`put_file` does not update the stored manifest.** After changing
    `environment.yaml` and `README.md` and re-uploading them plus the regenerated
    `rdf.yaml`, static validation and the BioEngine test both stayed green — they
    read the *file* — while the artifact's stored *manifest* record was three leaves
    stale (missing `reproducibility_tolerance`; two `sha256` values pointing at the
-   pre-change files). Reviewers read the manifest. Always follow a file change with
-   `am.edit(artifact_id=…, stage=True, manifest=<regenerated rdf.yaml>)`, and assert
-   equality before requesting review.
+   pre-change files). Reviewers read the manifest. Always follow a file change with an
+   `am.edit(…, stage=True, manifest=…)` that **merges** the regenerated `rdf.yaml` onto
+   the current staged record (`{**staged["manifest"], **rdf}`) rather than replacing it,
+   since the record also carries server-assigned fields such as `status`, `id` and
+   `id_emoji` that never appear in `rdf.yaml`. Then assert the shipped RDF is a
+   *subset* of the stored manifest before requesting review — not equality, which those
+   same extra fields would always fail.
 
 6. **`inference_check: failed` is normal for a custom-environment model.** With
    `custom_environment=True` the five report checks ran in the model's conda env and
@@ -544,7 +554,10 @@ config:
     reproducibility_tolerance:
       - output_ids: [instance_labels]
         weights_formats: [pytorch_state_dict]
-        mismatched_elements_per_million: 500
+        mismatched_elements_per_million: 2800
+    reproducibility_tolerance_rationale: |
+      Ceiling = smallest reference instance (2907 px) / output size (1016064 px)
+      = 2861 ppm; declared just under it. Observed 430.1 ppm on a BioEngine worker.
 ```
 
 ---
